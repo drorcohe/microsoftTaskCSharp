@@ -4,11 +4,11 @@ namespace AoratoExercise
 {
     internal abstract class RequestHandler
     {
-        public enum HandlerType { Static, Dynamic }
-
         protected const int MaxRequestsInFrame = 5;
         protected const int TimeFrameMs = 5000;
         public abstract bool ProcessRequest(long timestampMs);
+
+        public enum HandlerType { Static, Dynamic }
 
         public static RequestHandler GetHandler(HandlerType type)
         {
@@ -48,7 +48,6 @@ namespace AoratoExercise
         private readonly LinkedList<long> _timestamps = new LinkedList<long>();
         public override bool ProcessRequest(long timestampMs)
         {
-
             if (_timestamps.Count == MaxRequestsInFrame && _timestamps.Last.Value + TimeFrameMs < timestampMs)
             {
                 _timestamps.RemoveLast();
@@ -61,7 +60,6 @@ namespace AoratoExercise
 
             _timestamps.AddFirst(timestampMs);
             return true;
-
         }
     }
 
