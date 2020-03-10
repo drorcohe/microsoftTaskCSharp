@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +10,8 @@ namespace AoratoExercise
     {
         private readonly ConcurrentDictionary<int, RequestHandler> _clientIdToRequestHandler;
         private readonly RequestHandler.HandlerType _type;
-        private int _openRequests = 0;
+        private int _openRequests;
+        private string HttpPrefix => $"{_type.ToString()}Window";
 
         private Server(RequestHandler.HandlerType type)
         {
@@ -28,11 +28,10 @@ namespace AoratoExercise
             var listener = (HttpListener)result.AsyncState;
             if (!listener.IsListening)
             {
-                Console.WriteLine($"listener is closed. returns");
+                Console.WriteLine("listener is closed. returns");
                 _openRequests--;
                 return;
             }
-
 
             var context = listener.EndGetContext(result);
             var request = context.Request;
@@ -40,7 +39,8 @@ namespace AoratoExercise
 
             if (clientIdFound)
             {
-                var requestHandler = _clientIdToRequestHandler.GetOrAdd(clientId, _ => RequestHandler.GetHandler(_type));
+                var requestHandler =
+                    _clientIdToRequestHandler.GetOrAdd(clientId, _ => RequestHandler.GetHandler(_type));
                 var timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                 bool isRequestValid;
                 lock (requestHandler)
@@ -62,38 +62,28 @@ namespace AoratoExercise
 
             _openRequests--;
             Console.WriteLine($"{nameof(HandleRequest)}: end");
-
         }
-
 
 
         private void Listen(CancellationToken token)
         {
-
             var listener = new HttpListener();
-            var prefix = $"{_type.ToString()}Window";
-            var prefixes = new List<String> { "http://localhost:8080/" + prefix + "/" };
-            prefixes.ForEach(s => listener.Prefixes.Add(s));
+            listener.Prefixes.Add("http://localhost:8080/" + HttpPrefix + "/");
             listener.Start();
             do
             {
-
-                var requestCallback = new AsyncCallback(HandleRequest);
-                var context = listener.BeginGetContext(requestCallback, listener);
+                var context = listener.BeginGetContext(HandleRequest, listener);
                 context.AsyncWaitHandle.WaitOne(500, true);
-
             } while (!token.IsCancellationRequested);
 
             listener.Stop();
-            Task.Delay(1000).Wait();
-            while (_openRequests > 0)
+            do
             {
                 Task.Delay(1000).Wait();
-            }
+            } while (_openRequests > 0);
+
             listener.Close();
         }
-
-
 
 
         private static void Main(string[] args)
@@ -113,7 +103,8 @@ namespace AoratoExercise
             tokenSource.Cancel();
             listeningTask1.Wait();
             listeningTask2.Wait();
-            // listeningTask2.Wait();
+
+
             Console.WriteLine("Bye!");
         }
     }
