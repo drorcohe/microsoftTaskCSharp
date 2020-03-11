@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,9 +9,12 @@ namespace AoratoExercise
 {
     internal class Server
     {
+        private HttpListener listener = new HttpListener();
+        private List<Task> tasks = new List<Task>();
         private readonly ConcurrentDictionary<int, RequestHandler> _clientIdToRequestHandler;
         private readonly RequestHandler.HandlerType _type;
-        private int _openRequests;
+
+
         private string HttpPrefix => $"{_type.ToString()}Window";
 
         private Server(RequestHandler.HandlerType type)
@@ -20,20 +24,12 @@ namespace AoratoExercise
         }
 
 
-        private void HandleRequest(IAsyncResult result)
+        private void HandleRequest(HttpListenerContext context)
         {
             Console.WriteLine($"{nameof(HandleRequest)}: start");
-            _openRequests++;
             Task.Delay(200).Wait();
-            var listener = (HttpListener)result.AsyncState;
-            if (!listener.IsListening)
-            {
-                Console.WriteLine("listener is closed. returns");
-                _openRequests--;
-                return;
-            }
 
-            var context = listener.EndGetContext(result);
+
             var request = context.Request;
             var clientIdFound = int.TryParse(request.QueryString["clientId"], out var clientId);
 
@@ -56,53 +52,55 @@ namespace AoratoExercise
                                   $"{nameof(context.Response.StatusCode)}={context.Response.StatusCode}");
                 var buffer = System.Text.Encoding.UTF8.GetBytes($"<HTML><BODY> {response.StatusCode} </BODY></HTML>");
                 response.ContentLength64 = buffer.Length;
-                response.OutputStream.Write(buffer, 0, buffer.Length);
-                response.OutputStream.Close();
+                if (listener.IsListening)
+                {
+                    response.OutputStream.Write(buffer, 0, buffer.Length);
+                    response.OutputStream.Close();
+                }
+                Thread.Sleep(1000);
             }
 
-            _openRequests--;
+
             Console.WriteLine($"{nameof(HandleRequest)}: end");
         }
 
+        public void Close()
+        {
+            listener.Close();
+            Task.WaitAll(tasks.ToArray());
+        }
 
         private void Listen(CancellationToken token)
         {
-            var listener = new HttpListener();
             listener.Prefixes.Add("http://localhost:8080/" + HttpPrefix + "/");
             listener.Start();
             do
             {
-                var context = listener.BeginGetContext(HandleRequest, listener);
-                context.AsyncWaitHandle.WaitOne(500, true);
+                var context = listener.GetContext();
+                tasks.Add(Task.Run(() => HandleRequest(context)));
             } while (!token.IsCancellationRequested);
 
-            listener.Stop();
-            do
-            {
-                Task.Delay(1000).Wait();
-            } while (_openRequests > 0);
-
-            listener.Close();
         }
 
 
-        private static void Main(string[] args)
+        private static void Main()
         {
             var tokenSource = new CancellationTokenSource();
             var token = tokenSource.Token;
 
             var staticServer = new Server(RequestHandler.HandlerType.Static);
-            var listeningTask1 = Task.Run(() => staticServer.Listen(token));
+
+            Task.Run(() => staticServer.Listen(token));
 
             var dynamicServer = new Server(RequestHandler.HandlerType.Dynamic);
-            var listeningTask2 = Task.Run(() => dynamicServer.Listen(token));
+            Task.Run(() => dynamicServer.Listen(token));
 
             Console.WriteLine("Press any key to stop");
             Console.ReadKey();
-
             tokenSource.Cancel();
-            listeningTask1.Wait();
-            listeningTask2.Wait();
+            staticServer.Close();
+            dynamicServer.Close();
+
 
 
             Console.WriteLine("Bye!");
